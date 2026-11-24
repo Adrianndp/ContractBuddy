@@ -11,7 +11,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.chunking import chunk_pages
 from app.config import settings
 from app.db import get_session, init_db
-from app.models import Chunk, Document, DocumentRead
+from app.models import Chunk, Document
+from app.schemas import DocumentRead
 
 
 @asynccontextmanager

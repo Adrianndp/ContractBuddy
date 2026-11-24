@@ -30,7 +30,7 @@ Start Claude Code sessions from this folder (`cd backend && claude`) so this fil
   - If Ollama can't be reached or a model isn't pulled, the API returns **503** with a readable `detail`, e.g. `"Model 'bge-m3' not found in Ollama. Run: ollama pull bge-m3"`.
 - **pgvector column dimension comes from config** (`EMBEDDING_DIM`).
   ⚠️ **Changing the embedding model (or its dimension) means dropping the tables and re-uploading all documents.** Vectors from different models aren't comparable, and `create_all()` doesn't alter existing columns.
-- **Chunking** (`app/chunking.py`): per page, ~500 chars with ~50 overlap, never crossing page boundaries (so every chunk has exactly one page number to cite). Cuts land on spaces so words stay intact. Text is cleaned first: Unicode NFKC (turns ligatures like `ﬁ` back into `fi`), whitespace collapsed to single spaces, NUL chars removed. Pages without text produce no chunks but still count in `page_count`.
+- **Chunking** (`app/chunking.py`, returns `TextChunk` DTOs): per page, ~500 chars with ~50 overlap, never crossing page boundaries (so every chunk has exactly one page number to cite). Cuts land on spaces so words stay intact. Text is cleaned first: Unicode NFKC (turns ligatures like `ﬁ` back into `fi`), whitespace collapsed to single spaces, NUL chars removed. Pages without text produce no chunks but still count in `page_count`.
 - **Retrieval**: top 5 chunks by cosine distance (`<=>`). Exact search, no ANN index yet; that's fine up to tens of thousands of chunks.
 - **Upload is all-or-nothing**: document and chunks (with embeddings) are written in one transaction, so if embedding fails nothing is stored.
 - **Config**: pydantic-settings reading `backend/.env` (template: `.env.example`; `.env` is git-ignored).
@@ -54,13 +54,24 @@ backend/
 │   ├── main.py            # FastAPI app, CORS, startup (create tables), endpoints
 │   ├── config.py          # pydantic-settings
 │   ├── db.py              # async engine + session dependency
-│   ├── models.py          # SQLModel tables (Document, Chunk) + request/response schemas
+│   ├── models.py          # SQLModel table models only (table=True): Document, Chunk
+│   ├── schemas.py         # API request/response schemas (DocumentRead, AskRequest, AskResponse, SourceRead, …)
+│   ├── dtos.py            # internal dataclasses passed between functions (TextChunk, …)
 │   ├── chunking.py        # pure chunking function (easy to test)
 │   └── llm.py             # Ollama embed/chat calls + error translation
 └── tests/
     ├── test_chunking.py
     └── test_endpoints.py
 ```
+
+**Rule: three kinds of data classes, three files, never mixed.**
+| File | What goes in it | Base |
+|---|---|---|
+| `models.py` | Database tables | `SQLModel` with `table=True` |
+| `schemas.py` | API request/response bodies (`*Read`, `*Request`, `*Response`, …); they appear in `/docs` | `SQLModel` / Pydantic, no `table=True` |
+| `dtos.py` | Internal data passed between functions (e.g. `TextChunk` from chunking); never exposed via the API, never stored | `@dataclass` |
+
+New classes in later steps follow the same split. Import tables from `app.models`, schemas from `app.schemas` and DTOs from `app.dtos`.
 
 ## Data model
 - **Document**: `id` (int PK), `filename` (str), `uploaded_at` (UTC datetime), `page_count` (int)

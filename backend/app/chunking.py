@@ -1,15 +1,9 @@
 import unicodedata
-from dataclasses import dataclass
+
+from app.dtos import TextChunk
 
 CHUNK_SIZE = 500  # characters
 CHUNK_OVERLAP = 50  # characters shared between neighbouring chunks
-
-
-@dataclass
-class TextChunk:
-    page_number: int  # 1-based
-    chunk_index: int  # position within the whole document
-    text: str
 
 
 def clean_text(text: str) -> str:
