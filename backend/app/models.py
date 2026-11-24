@@ -26,3 +26,14 @@ class Chunk(SQLModel, table=True):
     text: str = Field(sa_type=Text)
     # Dimension comes from config. Nullable until embeddings are added (step 3).
     embedding: list[float] | None = Field(default=None, sa_type=Vector(settings.embedding_dim))
+
+
+# --- API schemas (not tables) ---
+
+
+class DocumentRead(SQLModel):
+    id: int
+    filename: str
+    uploaded_at: datetime
+    page_count: int
+    chunk_count: int
