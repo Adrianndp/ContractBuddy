@@ -2,17 +2,23 @@ import asyncio
 import io
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Response, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from ollama import AsyncClient
 from pypdf import PdfReader
+from sqlalchemy import text
 from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.chunking import chunk_pages
 from app.config import settings
-from app.db import get_session, init_db
+from app.db import engine, get_session, init_db
 from app.models import Chunk, Document
-from app.schemas import DocumentRead
+from app.schemas import ChunkRead, DocumentRead, HealthRead
+
+HEALTH_TIMEOUT_S = 3  # a health check must answer fast, even when a dependency hangs
 
 
 @asynccontextmanager
@@ -29,6 +35,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Return 422s as {"detail": "<string>"} like every other error (FastAPI's default is a list)."""
+    messages = []
+    for error in exc.errors():
+        field = ".".join(str(part) for part in error["loc"] if part != "body")
+        messages.append(f"{field}: {error['msg']}" if field else error["msg"])
+    return JSONResponse(status_code=422, content={"detail": "; ".join(messages)})
+
+
+async def check_database() -> None:
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
+
+
+async def check_ollama() -> None:
+    await AsyncClient(host=settings.ollama_base_url).list()
+
+
+async def status_of(check) -> str:
+    try:
+        await asyncio.wait_for(check(), HEALTH_TIMEOUT_S)
+        return "ok"
+    except Exception:
+        return "error"
+
+
+@app.get("/health", response_model=HealthRead)
+async def health():
+    """Always 200: the body says which dependency is down, so the frontend can show it."""
+    database, ollama = await asyncio.gather(status_of(check_database), status_of(check_ollama))
+    return HealthRead(database=database, ollama=ollama)
 
 
 def extract_pages(data: bytes) -> list[str]:
@@ -81,6 +121,17 @@ async def list_documents(session: AsyncSession = Depends(get_session)):
     )
     rows = (await session.exec(statement)).all()
     return [DocumentRead(**doc.model_dump(), chunk_count=count) for doc, count in rows]
+
+
+@app.get("/documents/{document_id}/chunks", response_model=list[ChunkRead])
+async def list_chunks(document_id: int, session: AsyncSession = Depends(get_session)):
+    if await session.get(Document, document_id) is None:
+        raise HTTPException(404, f"Document {document_id} not found.")
+    statement = (
+        select(Chunk).where(col(Chunk.document_id) == document_id).order_by(col(Chunk.chunk_index))
+    )
+    chunks = (await session.exec(statement)).all()
+    return [ChunkRead(chunk_index=c.chunk_index, page_number=c.page_number, text=c.text) for c in chunks]
 
 
 @app.delete("/documents/{document_id}", status_code=204)

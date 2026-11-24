@@ -12,11 +12,11 @@ telemetry or any other external calls** that would send document text or questio
 
 The database name and user are still `manualbuddy` (from the old project name). That's intentional for now; don't rename them and don't touch `docker-compose.yml`.
 
-## Hard rule
-**Never read, create, modify or delete anything in `../frontend`, and never run commands there.**
-The frontend is built separately with Lovable against the API contract below. All backend work happens in this folder (`backend/`).
+## Frontend
+The frontend lives in `../frontend` (see the root `CLAUDE.md` for the overall structure). Work there is allowed.
+The **API contract below is the source of truth**: `frontend/src/lib/api.ts` must match it. When an endpoint, field or status code changes, update the backend code, this contract and `api.ts` together.
 
-Start Claude Code sessions from this folder (`cd backend && claude`) so this file is loaded.
+Start Claude Code sessions from the repo root; this file is picked up when working in `backend/`.
 
 ## Tech stack & decisions
 - **FastAPI**, async endpoints. Blocking work (pypdf parsing) runs in a thread (`asyncio.to_thread`) so it doesn't block the event loop.
@@ -36,6 +36,8 @@ Start Claude Code sessions from this folder (`cd backend && claude`) so this fil
 - **Config**: pydantic-settings reading `backend/.env` (template: `.env.example`; `.env` is git-ignored).
 - **Python env**: Python 3.14, venv at `backend/.venv`, dependencies pinned in `backend/requirements.txt` (pip).
 - **CORS**: allowed origins come from `CORS_ORIGINS`.
+- **Validation errors (422)** are returned as `{"detail": "<string>"}` by a custom handler in `main.py` (FastAPI's default `detail` is a list), so every error has the same shape.
+- **Health** (`GET /health`): checks Postgres (`SELECT 1`) and Ollama (list models) in parallel, 3 s timeout each. Always 200; the body says what's down.
 - **Tests**: pytest. Ollama calls are mocked.
 - Keep it simple: no auth, no background jobs, no extra layers.
 
@@ -51,15 +53,15 @@ backend/
 ├── .gitignore
 ├── app/
 │   ├── __init__.py
-│   ├── main.py            # FastAPI app, CORS, startup (create tables), endpoints
+│   ├── main.py            # FastAPI app, CORS, startup (create tables), 422 handler, endpoints
 │   ├── config.py          # pydantic-settings
 │   ├── db.py              # async engine + session dependency
 │   ├── models.py          # SQLModel table models only (table=True): Document, Chunk
-│   ├── schemas.py         # API request/response schemas (DocumentRead, AskRequest, AskResponse, SourceRead, …)
+│   ├── schemas.py         # API request/response schemas (DocumentRead, ChunkRead, HealthRead; later AskRequest, AskResponse, SourceRead)
 │   ├── dtos.py            # internal dataclasses passed between functions (TextChunk, …)
 │   ├── chunking.py        # pure chunking function (easy to test)
-│   └── llm.py             # Ollama embed/chat calls + error translation
-└── tests/
+│   └── llm.py             # ⏳ step 3: Ollama embed/chat calls + error translation
+└── tests/                 # ⏳ step 6
     ├── test_chunking.py
     └── test_endpoints.py
 ```
@@ -85,11 +87,11 @@ New classes in later steps follow the same split. Import tables from `app.models
 | `EMBEDDING_MODEL` | `bge-m3` | Embedding model |
 | `EMBEDDING_DIM` | `1024` | Must match the embedding model |
 | `CHAT_MODEL` | `llama3.2:3b` | Chat model |
-| `CORS_ORIGINS` | `["http://localhost:8080"]` | JSON list of allowed frontend origins |
+| `CORS_ORIGINS` | `["http://localhost:8080", "http://127.0.0.1:8080"]` | JSON list of allowed frontend origins |
 
 ## API contract
 Base URL: `http://localhost:8000`. Interactive docs: `/docs`.
-Errors always use FastAPI's format: `{"detail": "<human readable message>"}`.
+Errors always use the format `{"detail": "<human readable message>"}`, including 422 validation errors (e.g. `"file: Field required"`).
 Status markers: ✅ implemented · ⏳ planned.
 
 ### ✅ `POST /documents`: upload a PDF
@@ -101,11 +103,25 @@ Status markers: ✅ implemented · ⏳ planned.
   ```
 - `400` not a PDF / unreadable PDF · `422` PDF has no extractable text (e.g. scanned) · `503` Ollama unavailable / model missing (from step 3)
 
+### ✅ `GET /health`: status of the dependencies
+- `200 OK` (always, even when something is down):
+  ```json
+  {"database": "ok", "ollama": "error"}
+  ```
+  Each value is `"ok"` or `"error"`. The frontend polls this every 30 s.
+
 ### ✅ `GET /documents`: list documents
 - `200 OK` (newest first):
   ```json
   [{"id": 1, "filename": "mietvertrag.pdf", "uploaded_at": "2026-11-24T14:00:00Z", "page_count": 12, "chunk_count": 60}]
   ```
+
+### ✅ `GET /documents/{id}/chunks`: the stored chunks of a document
+- `200 OK` (ordered by `chunk_index`):
+  ```json
+  [{"chunk_index": 0, "page_number": 1, "text": "§ 1 Mietsache …"}]
+  ```
+- `404` unknown id
 
 ### ✅ `DELETE /documents/{id}`: delete a document and its chunks
 - `204 No Content` · `404` unknown id
@@ -121,11 +137,11 @@ Status markers: ✅ implemented · ⏳ planned.
   {
     "answer": "Die Kündigungsfrist beträgt drei Monate zum Monatsende. § 4 Abs. 2: „Das Mietverhältnis kann … mit einer Frist von drei Monaten gekündigt werden.“ [1]",
     "sources": [
-      {"document_id": 1, "filename": "mietvertrag.pdf", "page_number": 3, "text_snippet": "§ 4 Kündigung (1) … (2) Das Mietverhältnis kann …"}
+      {"document_id": 1, "filename": "mietvertrag.pdf", "page_number": 3, "text_snippet": "§ 4 Kündigung (1) … (2) Das Mietverhältnis kann …", "distance": 0.21}
     ]
   }
   ```
-  `sources` is ordered by relevance (max 5). In step 4 `answer` is `null` (retrieval only).
+  `sources` is ordered by relevance (max 5). `distance` is the cosine distance (lower = more relevant; the frontend shows it). In step 4 `answer` is `null` (retrieval only); the frontend shows a "retrieval only" note then.
 - **Answer rules (system prompt, step 5)**. The chat model must:
   1. Answer in the language of the question (German question → German answer, English → English).
   2. Answer only from the provided sources, never from general knowledge.

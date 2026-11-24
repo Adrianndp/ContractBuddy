@@ -1,0 +1,308 @@
+/*
+ * Tailwind v4 entry: config lives here, with no tailwind.config.js or PostCSS plugin.
+ * - Keep every @import in this top block, above @theme and the rest of the file.
+ * - Fonts are self-hosted via @fontsource (no Google Fonts request: the app stays local).
+ */
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+@import "@fontsource-variable/dm-sans";
+@import "@fontsource-variable/manrope";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design system definition.
+ *
+ * The design lives in this file: oklch color tokens on the shadcn variables
+ * (--background, --foreground, --primary, --secondary, --muted, --accent, ...) plus
+ * new tokens as needed, font tokens, and custom styles and animations.
+ *
+ * The @theme inline block maps CSS custom properties to Tailwind utility
+ * classes (e.g. --color-primary -> bg-primary, text-primary).
+ *
+ * The :root and .dark blocks define the actual color values using oklch.
+ * All colors MUST use oklch format.
+ *
+ * To add a new semantic color:
+ * 1. Add the variable to :root (light value) and .dark (dark value)
+ * 2. Register it in @theme inline as --color-<name>: var(--<name>)
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: oklch(0.995 0.001 150);
+  --foreground: oklch(0.25 0.015 155);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.129 0.042 264.695);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.129 0.042 264.695);
+  --primary: oklch(0.43 0.074 162);
+  --primary-foreground: oklch(0.99 0.002 150);
+  --secondary: oklch(0.953 0.015 158);
+  --secondary-foreground: oklch(0.38 0.065 160);
+  --muted: oklch(0.967 0.003 150);
+  --muted-foreground: oklch(0.52 0.013 150);
+  --accent: oklch(0.952 0.012 155);
+  --accent-foreground: oklch(0.32 0.04 155);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(0.916 0.006 150);
+  --input: oklch(0.89 0.008 150);
+  --ring: oklch(0.57 0.075 162);
+  --canvas: oklch(0.975 0.003 150);
+  --success: oklch(0.55 0.13 155);
+  --warning: oklch(0.48 0.095 65);
+  --warning-surface: oklch(0.97 0.016 80);
+  --overlay: oklch(0.2 0.01 150 / 30%);
+  --shadow-composer: 0 4px 24px oklch(0.2 0.01 150 / 4%);
+  --shadow-paper: 0 5px 18px oklch(0.25 0.03 150 / 7%);
+}
+
+.dark {
+  --background: oklch(0.129 0.042 264.695);
+  --foreground: oklch(0.984 0.003 247.858);
+  --card: oklch(0.208 0.042 265.755);
+  --card-foreground: oklch(0.984 0.003 247.858);
+  --popover: oklch(0.208 0.042 265.755);
+  --popover-foreground: oklch(0.984 0.003 247.858);
+  --primary: oklch(0.929 0.013 255.508);
+  --primary-foreground: oklch(0.208 0.042 265.755);
+  --secondary: oklch(0.279 0.041 260.031);
+  --secondary-foreground: oklch(0.984 0.003 247.858);
+  --muted: oklch(0.279 0.041 260.031);
+  --muted-foreground: oklch(0.704 0.04 256.788);
+  --accent: oklch(0.279 0.041 260.031);
+  --accent-foreground: oklch(0.984 0.003 247.858);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.551 0.027 264.364);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: "DM Sans Variable", sans-serif;
+    letter-spacing: 0;
+  }
+}
+
+@theme inline {
+  --font-sans: "DM Sans Variable", sans-serif;
+  --font-display: "Manrope Variable", sans-serif;
+  --color-canvas: var(--canvas);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-warning-surface: var(--warning-surface);
+  --color-overlay: var(--overlay);
+}
+
+.app-shell {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.contracts-sidebar {
+  width: 310px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--canvas);
+  display: flex;
+  flex-direction: column;
+}
+.chat-panel {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.chat-scroll {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+.chat-inner {
+  width: min(100% - 64px, 780px);
+  margin-inline: auto;
+}
+.empty-chat {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-block: 46px;
+  text-align: center;
+}
+.paper-scene {
+  position: relative;
+  width: 156px;
+  height: 144px;
+  margin-bottom: 30px;
+}
+.paper {
+  position: absolute;
+  width: 91px;
+  height: 116px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: var(--shadow-paper);
+  padding: 18px 14px;
+}
+.paper-back {
+  left: 19px;
+  top: 9px;
+  transform: rotate(-12deg);
+  background: var(--secondary);
+}
+.paper-front {
+  left: 46px;
+  top: 15px;
+  transform: rotate(9deg);
+}
+.paper-line {
+  height: 3px;
+  margin-top: 9px;
+  width: 100%;
+  border-radius: 1px;
+  background: var(--border);
+}
+.paper-line.short {
+  width: 64%;
+}
+.paper-seal {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: 5px solid var(--background);
+}
+.composer {
+  border: 1px solid var(--input);
+  border-radius: 8px;
+  background: var(--background);
+  box-shadow: var(--shadow-composer);
+  transition: border-color 150ms;
+}
+.composer:focus-within {
+  border-color: var(--primary);
+}
+.upload-zone {
+  border: 1px dashed var(--input);
+  border-radius: 8px;
+  background: var(--background);
+  transition:
+    background 150ms,
+    border-color 150ms;
+}
+.upload-zone.dragging {
+  background: var(--secondary);
+  border-color: var(--primary);
+}
+.message-enter {
+  animation: message-enter 200ms ease-out;
+}
+.relevance-meter {
+  width: 62px;
+  height: 5px;
+  accent-color: var(--primary);
+}
+.relevance-meter::-webkit-meter-bar {
+  background: var(--border);
+  border: 0;
+}
+.relevance-meter::-webkit-meter-optimum-value {
+  background: var(--primary);
+}
+@keyframes message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (max-width: 767px) {
+  .contracts-sidebar {
+    display: none;
+  }
+  .contracts-sidebar.mobile-open {
+    display: flex;
+    position: fixed;
+    top: 72px;
+    bottom: 0;
+    left: 0;
+    width: min(310px, 90vw);
+    z-index: 30;
+    box-shadow: var(--shadow-paper);
+  }
+  .chat-inner {
+    width: calc(100% - 32px);
+  }
+  .empty-chat {
+    padding-block: 30px;
+  }
+  .paper-scene {
+    margin-bottom: 18px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

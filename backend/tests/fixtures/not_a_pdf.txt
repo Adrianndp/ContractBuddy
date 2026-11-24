@@ -1,0 +1,2 @@
+Das ist keine PDF-Datei, sondern eine einfache Textdatei.
+Der Upload muss mit einer Fehlermeldung abgelehnt werden.

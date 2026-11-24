@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     embedding_model: str = "bge-m3"
     embedding_dim: int = 1024
     chat_model: str = "llama3.2:3b"
-    cors_origins: list[str] = ["http://localhost:8080"]
+    cors_origins: list[str] = ["http://localhost:8080", "http://127.0.0.1:8080"]
 
 
 settings = Settings()
