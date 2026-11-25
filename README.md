@@ -1,4 +1,5 @@
 # ContractBuddy
+<img width="3734" height="1982" alt="Screenshot From 2026-11-25 22-06-44" src="https://github.com/user-attachments/assets/393fd791-9ff4-41fb-9e80-4043da929bfb" />
 
 Ask questions about your own contracts — rental, phone, insurance, employment — and get answers that quote the relevant clause and cite the document and page.
 
