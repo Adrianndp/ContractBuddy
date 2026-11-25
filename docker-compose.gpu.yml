@@ -1,0 +1,17 @@
+# Optional NVIDIA GPU for Ollama, merged on top of docker-compose.yml.
+# Needs the NVIDIA driver + NVIDIA Container Toolkit on the host (check: docker run --rm --gpus all ubuntu nvidia-smi).
+#
+# Enable it permanently with this line in the root .env (see .env.example):
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml
+# or once:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

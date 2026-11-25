@@ -7,10 +7,10 @@ Every answer must cite the source document and page number.
 
 ## Privacy: everything runs locally on purpose
 Contracts contain personal data (names, addresses, IBANs, salaries, …). That's why the whole stack runs on this machine:
-Postgres in local Docker, Ollama on the host for embeddings and chat. **Don't add cloud APIs, hosted LLMs/embedding services,
+Postgres and Ollama (embeddings and chat) in local Docker, or Ollama on the host for local development. **Don't add cloud APIs, hosted LLMs/embedding services,
 telemetry or any other external calls** that would send document text or questions off the machine.
 
-The database name and user are still `manualbuddy` (from the old project name). That's intentional for now; don't rename them and don't touch `docker-compose.yml`.
+The database name and user are still `manualbuddy` (from the old project name). That's intentional for now; don't rename them (same for the Compose project name `manualbuddy` in the root `docker-compose.yml`, which keeps the data volume).
 
 ## Frontend
 The frontend lives in `../frontend` (see the root `CLAUDE.md` for the overall structure). Work there is allowed.
@@ -21,10 +21,10 @@ Start Claude Code sessions from the repo root; this file is picked up when worki
 ## Tech stack & decisions
 - **FastAPI**, async endpoints. Blocking work (pypdf parsing) runs in a thread (`asyncio.to_thread`) so it doesn't block the event loop.
 - **SQLModel** models on an async SQLAlchemy engine (`asyncpg` driver; `sqlalchemy[asyncio]` is listed explicitly because SQLAlchemy 2.1 no longer installs `greenlet` by default). Tables are created with `SQLModel.metadata.create_all()` at startup (after `CREATE EXTENSION IF NOT EXISTS vector`). No Alembic yet.
-- **Postgres + pgvector** via `docker-compose.yml` in this folder (image `pgvector/pgvector:pg17`, Compose project `manualbuddy`, volume `manualbuddy_pgdata`). Exposed on host port **5433**, because 5432 is taken by a local Postgres on this machine.
+- **Postgres + pgvector** via the root `../docker-compose.yml` (service `db`, image `pgvector/pgvector:pg17`, Compose project `manualbuddy`, volume `manualbuddy_pgdata`). Exposed on host port **5433** (127.0.0.1 only), because 5432 is taken by a local Postgres on this machine.
 - **pypdf** (with the `crypto` extra) for text extraction. Some PDFs are AES-"encrypted" only to block copying, and reading those needs `cryptography`. No OCR needed: all contracts are text-based PDFs. Scanned PDFs without a text layer are rejected with a clear error.
 - **PDF check**: filename must end in `.pdf` AND the file must contain the `%PDF-` header in its first 1 KB. Files pypdf can't open are rejected with 400.
-- **Ollama** runs locally on the host (not in Docker) and handles both embeddings and chat, via the official `ollama` package (`AsyncClient`).
+- **Ollama** runs locally and handles both embeddings and chat: as the Compose service `ollama` (reached as `http://ollama:11434`, not published to the host) when the stack runs in Docker, or on the host (`localhost:11434`) when running uvicorn locally. Called via the official `ollama` package (`AsyncClient`).
   - Default embedding model: `bge-m3` (1024 dims, multilingual, because contracts are mostly German, sometimes English). bge-m3 needs no query/passage prefixes.
   - Default chat model: `llama3.2:3b`. You can switch to a bigger one in `.env`.
   - If Ollama can't be reached or a model isn't pulled, the API returns **503** with a readable `detail`, e.g. `"Model 'bge-m3' not found in Ollama. Run: ollama pull bge-m3"`.
@@ -45,7 +45,8 @@ Start Claude Code sessions from the repo root; this file is picked up when worki
 ```
 backend/
 ├── CLAUDE.md
-├── docker-compose.yml     # Postgres + pgvector
+├── Dockerfile             # image for the root docker-compose.yml (service `backend`)
+├── .dockerignore
 ├── requirements.txt
 ├── .venv/                 # virtualenv (git-ignored)
 ├── .env.example           # copy to .env
@@ -83,7 +84,7 @@ New classes in later steps follow the same split. Import tables from `app.models
 | Variable | Default | Meaning |
 |---|---|---|
 | `DATABASE_URL` | `postgresql+asyncpg://manualbuddy:manualbuddy@localhost:5433/manualbuddy` | Postgres connection |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama on the host |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama on the host (Compose overrides it with `http://ollama:11434`) |
 | `EMBEDDING_MODEL` | `bge-m3` | Embedding model |
 | `EMBEDDING_DIM` | `1024` | Must match the embedding model |
 | `CHAT_MODEL` | `llama3.2:3b` | Chat model |
@@ -151,16 +152,17 @@ Status markers: ✅ implemented · ⏳ planned.
 - `503` Ollama unavailable / model missing
 
 ## How to run
-All commands run from `backend/`.
+The whole stack (db + Ollama + backend + frontend) can also run in Docker: see the root `CLAUDE.md`.
+For local development, the `docker compose` commands run from the **repo root**, everything else from `backend/`.
 
 ```bash
-# 1. Database (Postgres + pgvector)
-docker compose up -d            # start
+# 1. Database (Postgres + pgvector), from the repo root
+docker compose up -d db         # start only the database
 docker compose down             # stop (data kept)
 docker compose down -v          # stop AND delete all data (needed after changing the embedding model)
 docker compose exec db psql -U manualbuddy   # SQL shell (e.g. \d chunk)
 
-# 2. Ollama (on the host, not Docker)
+# 2. Ollama on the host (only for local dev; the Compose Ollama isn't reachable from the host)
 ollama serve                    # if not already running as a service
 ollama pull bge-m3
 ollama pull llama3.2:3b

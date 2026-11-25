@@ -1,0 +1,100 @@
+# Whole stack: Postgres + pgvector, Ollama (embeddings + chat), FastAPI backend, static frontend (nginx).
+#
+#   docker compose up -d --build    # everything → http://localhost:8080
+#                                   # first start downloads the models (~3 GB) into the "ollama" volume
+#   docker compose up -d db         # only the database (local dev with uvicorn / npm run dev)
+#
+# Published ports are bound to 127.0.0.1 only: contracts are personal data, nothing should be reachable from the LAN.
+# Ollama isn't published at all; only the backend talks to it, over the internal Compose network.
+
+# Kept from the old project name so the existing data volume (manualbuddy_pgdata) is reused.
+name: manualbuddy
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: manualbuddy
+      POSTGRES_PASSWORD: manualbuddy
+      POSTGRES_DB: manualbuddy
+    ports:
+      - "127.0.0.1:5433:5432" # 5433 on the host, because 5432 is taken by a local Postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U manualbuddy -d manualbuddy"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  ollama:
+    image: ollama/ollama
+    # No "ports:": 11434 is used by the Ollama on the host, and only the backend needs this one (as http://ollama:11434).
+    volumes:
+      - ollama:/root/.ollama # models survive restarts, downloaded only once
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    # CPU-only here, so it runs everywhere. NVIDIA GPU: opt in via docker-compose.gpu.yml (see .env.example).
+
+  # One-off: pulls the models configured in backend/.env (EMBEDDING_MODEL, CHAT_MODEL) into the ollama volume, then exits.
+  # Models already present are skipped, so later starts are fast and work offline.
+  ollama-init:
+    image: ollama/ollama
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      OLLAMA_HOST: http://ollama:11434 # the ollama CLI talks to the ollama service
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        for m in "$${EMBEDDING_MODEL:-bge-m3}" "$${CHAT_MODEL:-llama3.2:3b}"; do
+          if ollama show "$$m" > /dev/null 2>&1; then
+            echo "$$m: already present"
+          else
+            echo "$$m: pulling"
+            ollama pull "$$m"
+          fi
+        done
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build: ./backend
+    env_file:
+      - path: ./backend/.env # model choices, CORS_ORIGINS, …; optional
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://manualbuddy:manualbuddy@db:5432/manualbuddy
+      OLLAMA_BASE_URL: http://ollama:11434
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy # init_db() at startup needs Postgres to accept connections
+      ollama:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully # models are pulled before the first request
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # The URL the *browser* calls; baked into the bundle at build time → rebuild after changing it.
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    ports:
+      - "127.0.0.1:8080:80" # must match an origin in the backend's CORS_ORIGINS
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  ollama:
