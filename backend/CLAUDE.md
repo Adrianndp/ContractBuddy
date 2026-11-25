@@ -24,14 +24,14 @@ Start Claude Code sessions from the repo root; this file is picked up when worki
 - **Postgres + pgvector** via the root `../docker-compose.yml` (service `db`, image `pgvector/pgvector:pg17`, Compose project `manualbuddy`, volume `manualbuddy_pgdata`). Exposed on host port **5433** (127.0.0.1 only), because 5432 is taken by a local Postgres on this machine.
 - **pypdf** (with the `crypto` extra) for text extraction. Some PDFs are AES-"encrypted" only to block copying, and reading those needs `cryptography`. No OCR needed: all contracts are text-based PDFs. Scanned PDFs without a text layer are rejected with a clear error.
 - **PDF check**: filename must end in `.pdf` AND the file must contain the `%PDF-` header in its first 1 KB. Files pypdf can't open are rejected with 400.
-- **Ollama** runs locally and handles both embeddings and chat: as the Compose service `ollama` (reached as `http://ollama:11434`, not published to the host) when the stack runs in Docker, or on the host (`localhost:11434`) when running uvicorn locally. Called via the official `ollama` package (`AsyncClient`).
+- **Ollama** runs locally and handles both embeddings and chat: as the Compose service `ollama` (reached as `http://ollama:11434`, not published to the host) when the stack runs in Docker, or on the host (`localhost:11434`) when running uvicorn locally. Called via the official `ollama` package: one `AsyncClient` created in `app/ollama.py` and reused for chat, embed and the health check.
   - Default embedding model: `bge-m3` (1024 dims, multilingual, because contracts are mostly German, sometimes English). bge-m3 needs no query/passage prefixes.
   - Default chat model: `llama3.2:3b`. You can switch to a bigger one in `.env`.
   - If Ollama can't be reached or a model isn't pulled, the API returns **503** with a readable `detail`, e.g. `"Model 'bge-m3' not found in Ollama. Run: ollama pull bge-m3"`.
 - **pgvector column dimension comes from config** (`EMBEDDING_DIM`).
   ⚠️ **Changing the embedding model (or its dimension) means dropping the tables and re-uploading all documents.** Vectors from different models aren't comparable, and `create_all()` doesn't alter existing columns.
 - **Chunking** (`app/chunking.py`, returns `TextChunk` DTOs): per page, ~500 chars with ~50 overlap, never crossing page boundaries (so every chunk has exactly one page number to cite). Cuts land on spaces so words stay intact. Text is cleaned first: Unicode NFKC (turns ligatures like `ﬁ` back into `fi`), whitespace collapsed to single spaces, NUL chars removed. Pages without text produce no chunks but still count in `page_count`.
-- **Retrieval**: top 5 chunks by cosine distance (`<=>`). Exact search, no ANN index yet; that's fine up to tens of thousands of chunks.
+- **Retrieval**: the question is embedded with the same model (`embed()`), then the top 5 chunks by cosine distance (`<=>`, `cosine_distance()` in SQLAlchemy), optionally filtered by `document_ids`. Exact search, no ANN index yet; that's fine up to tens of thousands of chunks.
 - **Upload is all-or-nothing**: document and chunks (with embeddings) are written in one transaction, so if embedding fails nothing is stored.
 - **Config**: pydantic-settings reading `backend/.env` (template: `.env.example`; `.env` is git-ignored).
 - **Python env**: Python 3.14, venv at `backend/.venv`, dependencies pinned in `backend/requirements.txt` (pip).
@@ -61,7 +61,7 @@ backend/
 │   ├── schemas.py         # API request/response schemas (DocumentRead, ChunkRead, HealthRead, AskRequest, AskResponse, SourceRead)
 │   ├── dtos.py            # internal dataclasses passed between functions (TextChunk, …)
 │   ├── chunking.py        # pure chunking function (easy to test)
-│   └── ollama.py          # Ollama calls: chat(prompt) → reply, embed(texts) → vectors (later: error translation)
+│   └── ollama.py          # shared AsyncClient; chat(prompt) → reply, embed(texts) → vectors (later: error translation)
 └── tests/                 # ⏳ step 6
     ├── test_chunking.py
     └── test_endpoints.py
@@ -128,15 +128,14 @@ Status markers: ✅ implemented · 🧪 stub · ⏳ planned.
 - `204 No Content` · `404` unknown id
 
 ### 🧪 `POST /ask`: ask a question
-> **Currently a stub**: sends the question as-is to the chat model (`app/ollama.py`, no system prompt, no documents)
-> and returns its reply as `answer` with `sources: []`. `document_ids` is ignored, Ollama errors aren't translated to 503 yet.
-> Retrieval (step 4) and the real answer rules (step 5) come later; the request/response shape below is final.
+> **Currently retrieval only (step 4)**: embeds the question, returns the top 5 chunks as `sources` and `answer: null`.
+> The chat model's answer comes in step 5; the request/response shape below is final. Ollama errors aren't translated to 503 yet.
 
 - Request:
   ```json
   {"question": "Wie lange ist die Kündigungsfrist?", "document_ids": [1, 2]}
   ```
-  `document_ids` is optional (omit or `null` = search all documents). `question` must be non-empty.
+  `document_ids` is optional (omit or `null` = search all documents; `[]` = no documents, so no sources). `question` must be non-empty.
 - `200 OK`:
   ```json
   {
@@ -146,13 +145,18 @@ Status markers: ✅ implemented · 🧪 stub · ⏳ planned.
     ]
   }
   ```
-  `sources` is ordered by relevance (max 5). `distance` is the cosine distance (lower = more relevant; the frontend shows it). In step 4 `answer` is `null` (retrieval only); the frontend shows a "retrieval only" note then.
+  `sources` is ordered by relevance (max 5). `text_snippet` is the full chunk text (~500 chars). `distance` is the cosine distance (lower = more relevant; the frontend shows it). In step 4 `answer` is `null` (retrieval only); the frontend shows a "retrieval only" note then.
+- **Prompt structure (step 5)**:
+  - The answer rules below go in a **system** message; the sources and the question go in a **user** message.
+  - Each source in the prompt is labelled with its number, filename and page, e.g. `[1] mietvertrag.pdf, Seite 3:` followed by
+    the chunk text, so the model can cite `[n]` and name the contract.
 - **Answer rules (system prompt, step 5)**. The chat model must:
   1. Answer in the language of the question (German question → German answer, English → English).
   2. Answer only from the provided sources, never from general knowledge.
   3. Quote the relevant clause word for word (with its § / section number if present) and cite it as `[n]`, where `n` is the source's position in `sources` (1-based).
   4. If the answer isn't in the documents, say so clearly (e.g. „Dazu steht in den Dokumenten nichts.“) instead of guessing.
-  5. Not give legal advice: explain what the contract says, don't assess validity or recommend what to do. Suggest asking a lawyer or consumer advice centre (Verbraucherzentrale) when the question goes beyond what the text says.
+  5. When the sources come from different contracts, name which contract (filename) each fact comes from.
+  6. Not give legal advice: explain what the contract says, don't assess validity or recommend what to do. Suggest asking a lawyer or consumer advice centre (Verbraucherzentrale) when the question goes beyond what the text says.
 - `503` Ollama unavailable / model missing
 
 ## How to run
@@ -185,6 +189,6 @@ pytest
 - [x] 1. docker-compose with Postgres + pgvector, DB connection, models, create tables
 - [x] 2. `POST /documents`: upload, text extraction, chunking (no embeddings yet), plus `GET /documents` and `DELETE /documents/{id}`
 - [x] 3. Embeddings with Ollama: store a vector for every chunk (`embed()` in `app/ollama.py`, one call per upload; Ollama errors not yet translated to 503)
-- [ ] 4. `POST /ask` returning only the retrieved chunks (no LLM yet) to check retrieval quality
+- [x] 4. `POST /ask` returning only the retrieved chunks (no LLM yet) to check retrieval quality
 - [ ] 5. Add the Ollama chat call to `/ask` (system prompt follows the answer rules under `POST /ask`)
 - [ ] 6. Tests for the chunking logic and the endpoints (Ollama mocked)

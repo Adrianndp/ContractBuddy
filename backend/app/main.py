@@ -6,7 +6,6 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFi
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from ollama import AsyncClient
 from pypdf import PdfReader
 from sqlalchemy import text
 from sqlmodel import col, func, select
@@ -16,10 +15,18 @@ from app.chunking import chunk_pages
 from app.config import settings
 from app.db import engine, get_session, init_db
 from app.models import Chunk, Document
-from app.ollama import chat, embed
-from app.schemas import AskRequest, AskResponse, ChunkRead, DocumentRead, HealthRead
+from app.ollama import client, embed
+from app.schemas import (
+    AskRequest,
+    AskResponse,
+    ChunkRead,
+    DocumentRead,
+    HealthRead,
+    SourceRead,
+)
 
 HEALTH_TIMEOUT_S = 3  # a health check must answer fast, even when a dependency hangs
+TOP_K = 5  # number of chunks /ask retrieves
 
 
 @asynccontextmanager
@@ -54,7 +61,7 @@ async def check_database() -> None:
 
 
 async def check_ollama() -> None:
-    await AsyncClient(host=settings.ollama_base_url).list()
+    await client.list()
 
 
 async def status_of(check) -> str:
@@ -155,6 +162,28 @@ async def delete_document(document_id: int, session: AsyncSession = Depends(get_
 
 
 @app.post("/ask", response_model=AskResponse)
-async def ask(request: AskRequest):
-    # Simple version: the question goes straight to the chat model, no retrieval/sources yet.
-    return AskResponse(answer=await chat(request.question), sources=[])
+async def ask(request: AskRequest, session: AsyncSession = Depends(get_session)):
+    # Step 4: retrieval only (answer = null). Step 5 adds the chat model's answer.
+    [question_embedding] = await embed([request.question])
+    distance = col(Chunk.embedding).cosine_distance(question_embedding)  # pgvector's <=>
+    statement = (
+        select(Chunk, Document.filename, distance)
+        .join(Document, col(Chunk.document_id) == col(Document.id))
+        .where(col(Chunk.embedding).is_not(None))
+        .order_by(distance)
+        .limit(TOP_K)
+    )
+    if request.document_ids is not None:
+        statement = statement.where(col(Chunk.document_id).in_(request.document_ids))
+    rows = (await session.exec(statement)).all()
+    sources = [
+        SourceRead(
+            document_id=chunk.document_id,
+            filename=filename,
+            page_number=chunk.page_number,
+            text_snippet=chunk.text,
+            distance=dist,
+        )
+        for chunk, filename, dist in rows
+    ]
+    return AskResponse(answer=None, sources=sources)
