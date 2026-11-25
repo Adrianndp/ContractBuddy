@@ -11,7 +11,7 @@ external calls that would send document text or questions off the machine (detai
 ContractBuddy/
 ├── CLAUDE.md                    # this file: overall structure, how the parts connect, how to run
 ├── .gitignore                   # root .env
-├── .env.example                 # Compose settings: GPU opt-in (COMPOSE_FILE), VITE_API_URL
+├── .env.example                 # the ONE config for everything (Compose, backend, Vite); copy to .env
 ├── docker-compose.yml           # whole stack: db + ollama + backend + frontend (Compose project `manualbuddy`), CPU-only
 ├── docker-compose.gpu.yml       # optional override: NVIDIA GPU for ollama
 ├── backend/                     # FastAPI + Postgres/pgvector + Ollama. Details, conventions, API contract: backend/CLAUDE.md
@@ -25,7 +25,6 @@ ContractBuddy/
     ├── components.json          # shadcn CLI config (for `npx shadcn add <component>`)
     ├── Dockerfile               # node 24 build stage → nginx serving dist/client
     ├── nginx.conf               # SPA fallback to _shell.html
-    ├── .env.example             # VITE_API_URL
     ├── public/                  # favicon.ico, robots.txt
     └── src/
         ├── styles.css           # Tailwind entry + design tokens; fonts self-hosted via @fontsource
@@ -75,7 +74,7 @@ docker compose exec db psql -U manualbuddy   # SQL shell
 - **First start downloads ~3 GB of models** (`bge-m3` + `llama3.2:3b`) into the volume `manualbuddy_ollama`, so it takes a
   while; the backend only starts after that. Later starts skip models that are already there (works offline).
 - Services: `db`, `ollama`, `ollama-init` (one-off: waits for `ollama` to be healthy, pulls `EMBEDDING_MODEL` and
-  `CHAT_MODEL` from `backend/.env` (defaults `bge-m3`, `llama3.2:3b`), then exits), `backend`, `frontend`.
+  `CHAT_MODEL` from `.env` (defaults `bge-m3`, `llama3.2:3b`), then exits), `backend`, `frontend`.
 - `ollama` is **not published** to the host (11434 is the host's own Ollama); the backend reaches it as `http://ollama:11434`
   on the internal Compose network.
 - **CPU-only** by default, so it runs on any machine. **NVIDIA GPU is opt-in** via the override file `docker-compose.gpu.yml`:
@@ -83,7 +82,7 @@ docker compose exec db psql -U manualbuddy   # SQL shell
   Needs the NVIDIA Container Toolkit on the host (check: `docker run --rm --gpus all ubuntu nvidia-smi`), otherwise
   `up` fails with `could not select device driver "nvidia"`. Don't put the GPU block back into `docker-compose.yml`.
 - Published ports are bound to **127.0.0.1** only (5433 db, 8000 backend, 8080 frontend): nothing is reachable from the LAN.
-- Compose sets `DATABASE_URL`/`OLLAMA_BASE_URL` for the backend; the other settings (models, `CORS_ORIGINS`) come from `backend/.env` if present.
+- Compose overrides `DATABASE_URL`/`OLLAMA_BASE_URL` for the backend container; the other settings (models, `CORS_ORIGINS`) come from the root `.env`.
 - `VITE_API_URL` is a build arg (default `http://localhost:8000`, override via shell env or the root `.env`); rebuild the frontend after changing it.
 - The Compose project is still named `manualbuddy` so the existing data volume `manualbuddy_pgdata` is reused.
 - The full stack occupies :8000 and :8080, so stop it (`docker compose stop backend frontend`) before running uvicorn / `npm run dev` locally.

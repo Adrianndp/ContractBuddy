@@ -5,6 +5,7 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   server: { port: 8080 },
+  envDir: "..", // the one .env for the whole project is in the repo root (only VITE_* reach the browser)
   resolve: { tsconfigPaths: true }, // "@/..." imports, from tsconfig.json "paths"
   plugins: [
     tailwindcss(),

@@ -82,7 +82,7 @@ docker compose logs -f ollama-init
 
 Later starts reuse the downloaded models and work offline.
 
-**GPU (optional):** with an NVIDIA GPU and the NVIDIA Container Toolkit installed, copy `.env.example` to `.env` and uncomment `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`. Answers get much faster.
+**GPU (optional):** with an NVIDIA GPU and the NVIDIA Container Toolkit installed, copy `.env.example` to `.env` and make sure `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml` is uncommented. Answers get much faster.
 
 ```bash
 docker compose down        # stop, keep data and models
@@ -101,11 +101,13 @@ docker compose up -d db
 ollama pull bge-m3
 ollama pull llama3.2:3b
 
+# Config (one file for everything, first time only)
+cp .env.example .env
+
 # Backend → http://localhost:8000/docs
 cd backend
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
+pip install -r requirements-dev.txt
 uvicorn app.main:app --reload
 
 # Frontend → http://localhost:8080  (needs npm >= 11)
@@ -123,7 +125,7 @@ cd frontend && npm test
 
 ## Configuration
 
-Backend settings live in `backend/.env` (template: `backend/.env.example`):
+All settings live in **one** `.env` in the repo root (template: `.env.example`). Docker Compose, the backend and the frontend build all read it:
 
 | Variable | Default | Description |
 |---|---|---|
@@ -134,7 +136,8 @@ Backend settings live in `backend/.env` (template: `backend/.env.example`):
 | `CHAT_MODEL` | `llama3.2:3b` | Chat model, e.g. `qwen2.5:7b` for better answers |
 | `CORS_ORIGINS` | `["http://localhost:8080", "http://127.0.0.1:8080"]` | Allowed frontend origins |
 
-The frontend reads `VITE_API_URL` (default `http://localhost:8000`) at **build time**.
+| `VITE_API_URL` | `http://localhost:8000` | Backend URL the browser calls, baked into the frontend at **build time** |
+| `COMPOSE_FILE` | (unset = CPU) | `docker-compose.yml:docker-compose.gpu.yml` enables the NVIDIA GPU for Ollama |
 
 > Changing the embedding model means dropping the tables and re-uploading all documents: vectors from different models aren't comparable.
 

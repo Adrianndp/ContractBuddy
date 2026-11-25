@@ -6,6 +6,9 @@
 #
 # Published ports are bound to 127.0.0.1 only: contracts are personal data, nothing should be reachable from the LAN.
 # Ollama isn't published at all; only the backend talks to it, over the internal Compose network.
+#
+# All settings live in the root .env (template: .env.example). Compose reads it automatically for
+# ${...} and COMPOSE_FILE, and it's passed to backend and ollama-init via env_file below.
 
 # Kept from the old project name so the existing data volume (manualbuddy_pgdata) is reused.
 name: manualbuddy
@@ -40,12 +43,12 @@ services:
       start_period: 5s
     # CPU-only here, so it runs everywhere. NVIDIA GPU: opt in via docker-compose.gpu.yml (see .env.example).
 
-  # One-off: pulls the models configured in backend/.env (EMBEDDING_MODEL, CHAT_MODEL) into the ollama volume, then exits.
+  # One-off: pulls the models configured in .env (EMBEDDING_MODEL, CHAT_MODEL) into the ollama volume, then exits.
   # Models already present are skipped, so later starts are fast and work offline.
   ollama-init:
     image: ollama/ollama
     env_file:
-      - path: ./backend/.env
+      - path: ./.env
         required: false
     environment:
       OLLAMA_HOST: http://ollama:11434 # the ollama CLI talks to the ollama service
@@ -69,9 +72,10 @@ services:
   backend:
     build: ./backend
     env_file:
-      - path: ./backend/.env # model choices, CORS_ORIGINS, …; optional
+      - path: ./.env # model choices, CORS_ORIGINS, …; optional
         required: false
     environment:
+      # Override the .env values, which point to localhost for running uvicorn on the host.
       DATABASE_URL: postgresql+asyncpg://manualbuddy:manualbuddy@db:5432/manualbuddy
       OLLAMA_BASE_URL: http://ollama:11434
     ports:

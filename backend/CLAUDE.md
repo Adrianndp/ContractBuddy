@@ -33,7 +33,7 @@ Start Claude Code sessions from the repo root; this file is picked up when worki
 - **Chunking** (`app/chunking.py`, returns `TextChunk` DTOs): per page, ~500 chars with ~50 overlap, never crossing page boundaries (so every chunk has exactly one page number to cite). Cuts land on spaces so words stay intact. Text is cleaned first (`clean_text()`): broken ligatures from some Word-exported PDFs are fixed (a character U+XX00 whose high byte XX is an ASCII letter becomes that letter, e.g. `verp昀氀ichtet` → `verpflichtet`; done before NFKC, which doesn't catch them), then Unicode NFKC (turns ligatures like `ﬁ` back into `fi`), whitespace collapsed to single spaces, NUL chars removed. Pages without text produce no chunks but still count in `page_count`.
 - **Retrieval**: the question is embedded with the same model (`embed()`), then the top 5 chunks by cosine distance (`<=>`, `cosine_distance()` in SQLAlchemy), optionally filtered by `document_ids`. Exact search, no ANN index yet; that's fine up to tens of thousands of chunks.
 - **Upload is all-or-nothing**: document and chunks (with embeddings) are written in one transaction, so if embedding fails nothing is stored.
-- **Config**: pydantic-settings reading `backend/.env` (template: `.env.example`; `.env` is git-ignored).
+- **Config**: pydantic-settings reading the **root** `.env` (`../.env`, template `../.env.example`, git-ignored). It's the one config file for the whole project; there is no `backend/.env`.
 - **Python env**: Python 3.14, venv at `backend/.venv`, dependencies pinned in `backend/requirements.txt` (pip).
 - **CORS**: allowed origins come from `CORS_ORIGINS`.
 - **Validation errors (422)** are returned as `{"detail": "<string>"}` by a custom handler in `main.py` (FastAPI's default `detail` is a list), so every error has the same shape.
@@ -52,8 +52,6 @@ backend/
 ├── requirements-dev.txt   # -r requirements.txt + pytest
 ├── pytest.ini
 ├── .venv/                 # virtualenv (git-ignored)
-├── .env.example           # copy to .env
-├── .env                   # local config (git-ignored)
 ├── .gitignore
 ├── app/
 │   ├── __init__.py
@@ -196,7 +194,7 @@ ollama pull llama3.2:3b
 # 3. Python env + app
 source .venv/bin/activate
 pip install -r requirements-dev.txt   # app + pytest (the Docker image installs only requirements.txt)
-cp .env.example .env            # first time only
+cp ../.env.example ../.env      # first time only (one .env in the repo root)
 uvicorn app.main:app --reload   # → http://localhost:8000/docs
 
 # 4. Tests (from backend/)

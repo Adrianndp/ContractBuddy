@@ -2,8 +2,9 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Resolve .env relative to backend/, so it works no matter where uvicorn/pytest is started from.
-ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+# The one .env for the whole project is in the repo root (backend/app/config.py → ../../.env), resolved from this
+# file so it works no matter where uvicorn/pytest is started from. In Docker it doesn't exist: Compose sets the env.
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 class Settings(BaseSettings):
