@@ -98,10 +98,10 @@ Status markers: ✅ implemented · ⏳ planned.
 
 ### ✅ `POST /documents`: upload a PDF
 - Request: `multipart/form-data` with a field `file` (PDF).
-  `curl -F "file=@mietvertrag.pdf" http://localhost:8000/documents`
+  `curl -F "file=@contract.pdf" http://localhost:8000/documents`
 - `201 Created`:
   ```json
-  {"id": 1, "filename": "mietvertrag.pdf", "uploaded_at": "2026-11-24T14:00:00Z", "page_count": 12, "chunk_count": 60}
+  {"id": 1, "filename": "contract.pdf", "uploaded_at": "2026-11-24T14:00:00Z", "page_count": 12, "chunk_count": 60}
   ```
 - `400` not a PDF / unreadable PDF · `422` PDF has no extractable text (e.g. scanned) · `503` Ollama unavailable / embedding model missing
 
@@ -115,7 +115,7 @@ Status markers: ✅ implemented · ⏳ planned.
 ### ✅ `GET /documents`: list documents
 - `200 OK` (newest first):
   ```json
-  [{"id": 1, "filename": "mietvertrag.pdf", "uploaded_at": "2026-11-24T14:00:00Z", "page_count": 12, "chunk_count": 60}]
+  [{"id": 1, "filename": "contract.pdf", "uploaded_at": "2026-11-24T14:00:00Z", "page_count": 12, "chunk_count": 60}]
   ```
 
 ### ✅ `GET /documents/{id}/chunks`: the stored chunks of a document
@@ -142,7 +142,7 @@ those chunks (`temperature` 0.1). Prompt and rules live in `app/prompts.py`.
   {
     "answer": "Die Kündigungsfrist beträgt drei Monate zum Monatsende. § 4 Abs. 2: „Das Mietverhältnis kann … mit einer Frist von drei Monaten gekündigt werden.“ [1]",
     "sources": [
-      {"document_id": 1, "filename": "mietvertrag.pdf", "page_number": 3, "text_snippet": "§ 4 Kündigung (1) … (2) Das Mietverhältnis kann …", "distance": 0.21}
+      {"document_id": 1, "filename": "contract.pdf", "page_number": 3, "text_snippet": "§ 4 Kündigung (1) … (2) Das Mietverhältnis kann …", "distance": 0.21}
     ]
   }
   ```
@@ -154,7 +154,7 @@ those chunks (`temperature` 0.1). Prompt and rules live in `app/prompts.py`.
   `"No matching documents found. Upload a contract first or change the selection."`
 - **Prompt structure** (`app/prompts.py`):
   - The answer rules below go in a **system** message; the sources and the question go in a **user** message.
-  - Each source in the prompt is labelled with its number, filename and page, e.g. `[1] mietvertrag.pdf, page 3` followed by
+  - Each source in the prompt is labelled with its number, filename and page, e.g. `[1] contract.pdf, page 3` followed by
     the chunk text, so the model can cite `[n]` and name the contract. `n` = position in the returned `sources` (1-based).
   - The user message is `Sources:` + the numbered sources + `Question: <question>`. The system prompt is in English
     (small models follow English instructions best) and must say the same as the rules below.
@@ -205,6 +205,6 @@ pytest
 - [x] 3. Embeddings with Ollama: store a vector for every chunk (`embed()` in `app/ollama.py`, one call per upload)
 - [x] 4. `POST /ask` returning only the retrieved chunks (no LLM yet) to check retrieval quality
 - [x] 5. Add the Ollama chat call to `/ask` (system prompt follows the answer rules under `POST /ask`), Ollama errors → 503
-  - Known issue: `llama3.2:3b` follows the rules only partly (2026-11-25, test contract): often no word-for-word quote / `[n]`,
+  - Known issue: `llama3.2:3b` follows the rules only partly (2026-11-25, sample rental contract): often no word-for-word quote / `[n]`,
     answered an English question in German, and once said "nichts" although the clause was in source [1].
 - [ ] 6. Tests for the chunking logic and the endpoints (Ollama mocked)
