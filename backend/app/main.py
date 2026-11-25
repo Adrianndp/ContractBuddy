@@ -16,7 +16,8 @@ from app.chunking import chunk_pages
 from app.config import settings
 from app.db import engine, get_session, init_db
 from app.models import Chunk, Document
-from app.schemas import ChunkRead, DocumentRead, HealthRead
+from app.ollama import chat
+from app.schemas import AskRequest, AskResponse, ChunkRead, DocumentRead, HealthRead
 
 HEALTH_TIMEOUT_S = 3  # a health check must answer fast, even when a dependency hangs
 
@@ -142,3 +143,9 @@ async def delete_document(document_id: int, session: AsyncSession = Depends(get_
     await session.delete(document)  # chunks are removed by the database (ON DELETE CASCADE)
     await session.commit()
     return Response(status_code=204)
+
+
+@app.post("/ask", response_model=AskResponse)
+async def ask(request: AskRequest):
+    # Simple version: the question goes straight to the chat model, no retrieval/sources yet.
+    return AskResponse(answer=await chat(request.question), sources=[])

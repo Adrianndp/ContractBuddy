@@ -58,10 +58,10 @@ backend/
 │   ├── config.py          # pydantic-settings
 │   ├── db.py              # async engine + session dependency
 │   ├── models.py          # SQLModel table models only (table=True): Document, Chunk
-│   ├── schemas.py         # API request/response schemas (DocumentRead, ChunkRead, HealthRead; later AskRequest, AskResponse, SourceRead)
+│   ├── schemas.py         # API request/response schemas (DocumentRead, ChunkRead, HealthRead, AskRequest, AskResponse, SourceRead)
 │   ├── dtos.py            # internal dataclasses passed between functions (TextChunk, …)
 │   ├── chunking.py        # pure chunking function (easy to test)
-│   └── llm.py             # ⏳ step 3: Ollama embed/chat calls + error translation
+│   └── ollama.py          # Ollama calls: chat(prompt) → reply (later: embeddings + error translation)
 └── tests/                 # ⏳ step 6
     ├── test_chunking.py
     └── test_endpoints.py
@@ -93,7 +93,7 @@ New classes in later steps follow the same split. Import tables from `app.models
 ## API contract
 Base URL: `http://localhost:8000`. Interactive docs: `/docs`.
 Errors always use the format `{"detail": "<human readable message>"}`, including 422 validation errors (e.g. `"file: Field required"`).
-Status markers: ✅ implemented · ⏳ planned.
+Status markers: ✅ implemented · 🧪 stub · ⏳ planned.
 
 ### ✅ `POST /documents`: upload a PDF
 - Request: `multipart/form-data` with a field `file` (PDF).
@@ -127,7 +127,11 @@ Status markers: ✅ implemented · ⏳ planned.
 ### ✅ `DELETE /documents/{id}`: delete a document and its chunks
 - `204 No Content` · `404` unknown id
 
-### ⏳ `POST /ask`: ask a question
+### 🧪 `POST /ask`: ask a question
+> **Currently a stub**: sends the question as-is to the chat model (`app/ollama.py`, no system prompt, no documents)
+> and returns its reply as `answer` with `sources: []`. `document_ids` is ignored, Ollama errors aren't translated to 503 yet.
+> Retrieval (step 4) and the real answer rules (step 5) come later; the request/response shape below is final.
+
 - Request:
   ```json
   {"question": "Wie lange ist die Kündigungsfrist?", "document_ids": [1, 2]}

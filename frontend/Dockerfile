@@ -14,4 +14,6 @@ RUN npm run build
 # Runtime stage: static files only, no Node.
 FROM nginx:1-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Remove nginx's default welcome page (index.html, 50x.html), so only the app is served.
+RUN rm -rf /usr/share/nginx/html/*
 COPY --from=build /app/dist/client /usr/share/nginx/html
