@@ -24,5 +24,5 @@ class Chunk(SQLModel, table=True):
     page_number: int  # 1-based, as printed in PDF viewers
     chunk_index: int  # order of the chunk within its document
     text: str = Field(sa_type=Text)
-    # Dimension comes from config. Nullable until embeddings are added (step 3).
+    # Dimension comes from config. Set for every chunk at upload; nullable in the table (no migration).
     embedding: list[float] | None = Field(default=None, sa_type=Vector(settings.embedding_dim))

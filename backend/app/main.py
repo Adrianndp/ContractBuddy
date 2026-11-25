@@ -16,7 +16,7 @@ from app.chunking import chunk_pages
 from app.config import settings
 from app.db import engine, get_session, init_db
 from app.models import Chunk, Document
-from app.ollama import chat
+from app.ollama import chat, embed
 from app.schemas import AskRequest, AskResponse, ChunkRead, DocumentRead, HealthRead
 
 HEALTH_TIMEOUT_S = 3  # a health check must answer fast, even when a dependency hangs
@@ -100,12 +100,21 @@ async def upload_document(file: UploadFile, session: AsyncSession = Depends(get_
             422, "No text found in the PDF. Scanned documents (images only) are not supported."
         )
 
+    # Embed before writing anything: if Ollama fails, nothing is stored.
+    embeddings = await embed([c.text for c in chunks])
+
     document = Document(filename=filename, page_count=len(pages))
     session.add(document)
     await session.flush()  # sends the INSERT so document.id is known; still one transaction
     session.add_all(
-        Chunk(document_id=document.id, page_number=c.page_number, chunk_index=c.chunk_index, text=c.text)
-        for c in chunks
+        Chunk(
+            document_id=document.id,
+            page_number=c.page_number,
+            chunk_index=c.chunk_index,
+            text=c.text,
+            embedding=e,
+        )
+        for c, e in zip(chunks, embeddings, strict=True)
     )
     await session.commit()
 

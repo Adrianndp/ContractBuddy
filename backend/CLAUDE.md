@@ -61,7 +61,7 @@ backend/
 │   ├── schemas.py         # API request/response schemas (DocumentRead, ChunkRead, HealthRead, AskRequest, AskResponse, SourceRead)
 │   ├── dtos.py            # internal dataclasses passed between functions (TextChunk, …)
 │   ├── chunking.py        # pure chunking function (easy to test)
-│   └── ollama.py          # Ollama calls: chat(prompt) → reply (later: embeddings + error translation)
+│   └── ollama.py          # Ollama calls: chat(prompt) → reply, embed(texts) → vectors (later: error translation)
 └── tests/                 # ⏳ step 6
     ├── test_chunking.py
     └── test_endpoints.py
@@ -78,7 +78,7 @@ New classes in later steps follow the same split. Import tables from `app.models
 
 ## Data model
 - **Document**: `id` (int PK), `filename` (str), `uploaded_at` (UTC datetime), `page_count` (int)
-- **Chunk**: `id` (int PK), `document_id` (FK → Document, ON DELETE CASCADE), `page_number` (int, 1-based), `chunk_index` (int, order within the document), `text` (str), `embedding` (vector(`EMBEDDING_DIM`), nullable until step 3)
+- **Chunk**: `id` (int PK), `document_id` (FK → Document, ON DELETE CASCADE), `page_number` (int, 1-based), `chunk_index` (int, order within the document), `text` (str), `embedding` (vector(`EMBEDDING_DIM`), set for every chunk at upload)
 
 ## Configuration (`.env`)
 | Variable | Default | Meaning |
@@ -184,7 +184,7 @@ pytest
 ## Progress
 - [x] 1. docker-compose with Postgres + pgvector, DB connection, models, create tables
 - [x] 2. `POST /documents`: upload, text extraction, chunking (no embeddings yet), plus `GET /documents` and `DELETE /documents/{id}`
-- [ ] 3. Embeddings with Ollama: store a vector for every chunk
+- [x] 3. Embeddings with Ollama: store a vector for every chunk (`embed()` in `app/ollama.py`, one call per upload; Ollama errors not yet translated to 503)
 - [ ] 4. `POST /ask` returning only the retrieved chunks (no LLM yet) to check retrieval quality
 - [ ] 5. Add the Ollama chat call to `/ask` (system prompt follows the answer rules under `POST /ask`)
 - [ ] 6. Tests for the chunking logic and the endpoints (Ollama mocked)
