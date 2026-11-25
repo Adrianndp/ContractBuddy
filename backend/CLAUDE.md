@@ -61,7 +61,8 @@ backend/
 │   ├── schemas.py         # API request/response schemas (DocumentRead, ChunkRead, HealthRead, AskRequest, AskResponse, SourceRead)
 │   ├── dtos.py            # internal dataclasses passed between functions (TextChunk, …)
 │   ├── chunking.py        # pure chunking function (easy to test)
-│   └── ollama.py          # shared AsyncClient; chat(prompt) → reply, embed(texts) → vectors (later: error translation)
+│   ├── ollama.py          # shared AsyncClient; chat(system, user) → reply, embed(texts) → vectors; OllamaError
+│   └── prompts.py         # SYSTEM_PROMPT (answer rules), build_user_message(), fixed no-sources answer
 └── tests/                 # ⏳ step 6
     ├── test_chunking.py
     └── test_endpoints.py
@@ -93,7 +94,7 @@ New classes in later steps follow the same split. Import tables from `app.models
 ## API contract
 Base URL: `http://localhost:8000`. Interactive docs: `/docs`.
 Errors always use the format `{"detail": "<human readable message>"}`, including 422 validation errors (e.g. `"file: Field required"`).
-Status markers: ✅ implemented · 🧪 stub · ⏳ planned.
+Status markers: ✅ implemented · ⏳ planned.
 
 ### ✅ `POST /documents`: upload a PDF
 - Request: `multipart/form-data` with a field `file` (PDF).
@@ -102,7 +103,7 @@ Status markers: ✅ implemented · 🧪 stub · ⏳ planned.
   ```json
   {"id": 1, "filename": "mietvertrag.pdf", "uploaded_at": "2026-11-24T14:00:00Z", "page_count": 12, "chunk_count": 60}
   ```
-- `400` not a PDF / unreadable PDF · `422` PDF has no extractable text (e.g. scanned) · `503` Ollama unavailable / model missing (from step 3)
+- `400` not a PDF / unreadable PDF · `422` PDF has no extractable text (e.g. scanned) · `503` Ollama unavailable / embedding model missing
 
 ### ✅ `GET /health`: status of the dependencies
 - `200 OK` (always, even when something is down):
@@ -127,9 +128,9 @@ Status markers: ✅ implemented · 🧪 stub · ⏳ planned.
 ### ✅ `DELETE /documents/{id}`: delete a document and its chunks
 - `204 No Content` · `404` unknown id
 
-### 🧪 `POST /ask`: ask a question
-> **Currently retrieval only (step 4)**: embeds the question, returns the top 5 chunks as `sources` and `answer: null`.
-> The chat model's answer comes in step 5; the request/response shape below is final. Ollama errors aren't translated to 503 yet.
+### ✅ `POST /ask`: ask a question
+Flow: embed the question → top 5 chunks by cosine distance (filtered by `document_ids`) → chat model answers from
+those chunks (`temperature` 0.1). Prompt and rules live in `app/prompts.py`.
 
 - Request:
   ```json
@@ -145,12 +146,19 @@ Status markers: ✅ implemented · 🧪 stub · ⏳ planned.
     ]
   }
   ```
-  `sources` is ordered by relevance (max 5). `text_snippet` is the full chunk text (~500 chars). `distance` is the cosine distance (lower = more relevant; the frontend shows it). In step 4 `answer` is `null` (retrieval only); the frontend shows a "retrieval only" note then.
-- **Prompt structure (step 5)**:
+  `sources` is ordered by relevance (max 5). `text_snippet` is the full chunk text (~500 chars). `distance` is the cosine distance (lower = more relevant; the frontend shows it). Since step 5 `answer` is always a string (it was `null` in step 4, retrieval only; the
+  frontend still handles `null` with a "retrieval only" note).
+- **No sources** (nothing uploaded, or `document_ids` matches nothing): the LLM is **not** called. `200` with a fixed
+  `answer` in the language of the question (guessed from common words, German wins ties) and `sources: []`:
+  `"Keine passenden Dokumente gefunden. Lade zuerst einen Vertrag hoch oder ändere die Auswahl."` /
+  `"No matching documents found. Upload a contract first or change the selection."`
+- **Prompt structure** (`app/prompts.py`):
   - The answer rules below go in a **system** message; the sources and the question go in a **user** message.
-  - Each source in the prompt is labelled with its number, filename and page, e.g. `[1] mietvertrag.pdf, Seite 3:` followed by
-    the chunk text, so the model can cite `[n]` and name the contract.
-- **Answer rules (system prompt, step 5)**. The chat model must:
+  - Each source in the prompt is labelled with its number, filename and page, e.g. `[1] mietvertrag.pdf, page 3` followed by
+    the chunk text, so the model can cite `[n]` and name the contract. `n` = position in the returned `sources` (1-based).
+  - The user message is `Sources:` + the numbered sources + `Question: <question>`. The system prompt is in English
+    (small models follow English instructions best) and must say the same as the rules below.
+- **Answer rules** (`SYSTEM_PROMPT` in `app/prompts.py`; change both together). The chat model must:
   1. Answer in the language of the question (German question → German answer, English → English).
   2. Answer only from the provided sources, never from general knowledge.
   3. Quote the relevant clause word for word (with its § / section number if present) and cite it as `[n]`, where `n` is the source's position in `sources` (1-based).
@@ -158,6 +166,12 @@ Status markers: ✅ implemented · 🧪 stub · ⏳ planned.
   5. When the sources come from different contracts, name which contract (filename) each fact comes from.
   6. Not give legal advice: explain what the contract says, don't assess validity or recommend what to do. Suggest asking a lawyer or consumer advice centre (Verbraucherzentrale) when the question goes beyond what the text says.
 - `503` Ollama unavailable / model missing
+
+### Ollama errors (`POST /documents`, `POST /ask`)
+`app/ollama.py` turns client errors into `OllamaError`; a handler in `main.py` returns `503` with the message as `detail`:
+- model not pulled: `"Model 'bge-m3' not found in Ollama. Run: ollama pull bge-m3"`
+- Ollama not reachable: `"Ollama is not reachable at http://ollama:11434."`
+- any other Ollama error response: `"Ollama error: <message from Ollama>"`
 
 ## How to run
 The whole stack (db + Ollama + backend + frontend) can also run in Docker: see the root `CLAUDE.md`.
@@ -188,7 +202,9 @@ pytest
 ## Progress
 - [x] 1. docker-compose with Postgres + pgvector, DB connection, models, create tables
 - [x] 2. `POST /documents`: upload, text extraction, chunking (no embeddings yet), plus `GET /documents` and `DELETE /documents/{id}`
-- [x] 3. Embeddings with Ollama: store a vector for every chunk (`embed()` in `app/ollama.py`, one call per upload; Ollama errors not yet translated to 503)
+- [x] 3. Embeddings with Ollama: store a vector for every chunk (`embed()` in `app/ollama.py`, one call per upload)
 - [x] 4. `POST /ask` returning only the retrieved chunks (no LLM yet) to check retrieval quality
-- [ ] 5. Add the Ollama chat call to `/ask` (system prompt follows the answer rules under `POST /ask`)
+- [x] 5. Add the Ollama chat call to `/ask` (system prompt follows the answer rules under `POST /ask`), Ollama errors → 503
+  - Known issue: `llama3.2:3b` follows the rules only partly (2026-11-25, test contract): often no word-for-word quote / `[n]`,
+    answered an English question in German, and once said "nichts" although the clause was in source [1].
 - [ ] 6. Tests for the chunking logic and the endpoints (Ollama mocked)

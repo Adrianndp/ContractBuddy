@@ -15,7 +15,8 @@ from app.chunking import chunk_pages
 from app.config import settings
 from app.db import engine, get_session, init_db
 from app.models import Chunk, Document
-from app.ollama import client, embed
+from app.ollama import OllamaError, chat, client, embed
+from app.prompts import SYSTEM_PROMPT, build_user_message, no_sources_answer
 from app.schemas import (
     AskRequest,
     AskResponse,
@@ -53,6 +54,12 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         field = ".".join(str(part) for part in error["loc"] if part != "body")
         messages.append(f"{field}: {error['msg']}" if field else error["msg"])
     return JSONResponse(status_code=422, content={"detail": "; ".join(messages)})
+
+
+@app.exception_handler(OllamaError)
+async def ollama_error_handler(request: Request, exc: OllamaError) -> JSONResponse:
+    """Ollama down or model missing → 503 with a readable detail (from /documents and /ask)."""
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 async def check_database() -> None:
@@ -163,7 +170,6 @@ async def delete_document(document_id: int, session: AsyncSession = Depends(get_
 
 @app.post("/ask", response_model=AskResponse)
 async def ask(request: AskRequest, session: AsyncSession = Depends(get_session)):
-    # Step 4: retrieval only (answer = null). Step 5 adds the chat model's answer.
     [question_embedding] = await embed([request.question])
     distance = col(Chunk.embedding).cosine_distance(question_embedding)  # pgvector's <=>
     statement = (
@@ -186,4 +192,7 @@ async def ask(request: AskRequest, session: AsyncSession = Depends(get_session))
         )
         for chunk, filename, dist in rows
     ]
-    return AskResponse(answer=None, sources=sources)
+    if not sources:  # nothing uploaded or the filter matches nothing: don't ask the LLM
+        return AskResponse(answer=no_sources_answer(request.question), sources=[])
+    answer = await chat(SYSTEM_PROMPT, build_user_message(sources, request.question))
+    return AskResponse(answer=answer, sources=sources)
