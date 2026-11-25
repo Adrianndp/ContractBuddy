@@ -1,3 +1,4 @@
+import string
 import unicodedata
 
 from app.dtos import TextChunk
@@ -6,13 +7,23 @@ CHUNK_SIZE = 500  # characters
 CHUNK_OVERLAP = 50  # characters shared between neighbouring chunks
 
 
+# Broken ligatures from some Word-exported PDFs: the glyph maps to the ASCII code shifted into the
+# high byte, e.g. U+6600 "昀" = f, U+6900 "椀" = i, U+6C00 "氀" = l ("verp昀氀ichtet" = "verpflichtet").
+# Maps every U+XX00 with XX an ASCII letter back to that letter. Side effect: the real CJK characters
+# at those code points (e.g. U+4E00 "一") are replaced too; fine for German/English contracts.
+SHIFTED_ASCII_LETTERS = {ord(c) << 8: c for c in string.ascii_letters}
+
+
 def clean_text(text: str) -> str:
     """Normalize extracted PDF text.
 
+    - Broken ligature characters (ASCII letter in the high byte, see SHIFTED_ASCII_LETTERS) become
+      that letter again. Done before NFKC, which doesn't know about them.
     - NFKC turns typographic ligatures back into letters ("ﬁle" -> "file"), so they match what users type.
     - All whitespace (PDF line breaks, tabs, double spaces) collapses into single spaces.
     - NUL characters are dropped: pypdf sometimes emits them and Postgres rejects them in text columns.
     """
+    text = text.translate(SHIFTED_ASCII_LETTERS)
     text = unicodedata.normalize("NFKC", text).replace("\x00", "")
     return " ".join(text.split())
 

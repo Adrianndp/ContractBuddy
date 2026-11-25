@@ -30,7 +30,7 @@ Start Claude Code sessions from the repo root; this file is picked up when worki
   - If Ollama can't be reached or a model isn't pulled, the API returns **503** with a readable `detail`, e.g. `"Model 'bge-m3' not found in Ollama. Run: ollama pull bge-m3"`.
 - **pgvector column dimension comes from config** (`EMBEDDING_DIM`).
   ⚠️ **Changing the embedding model (or its dimension) means dropping the tables and re-uploading all documents.** Vectors from different models aren't comparable, and `create_all()` doesn't alter existing columns.
-- **Chunking** (`app/chunking.py`, returns `TextChunk` DTOs): per page, ~500 chars with ~50 overlap, never crossing page boundaries (so every chunk has exactly one page number to cite). Cuts land on spaces so words stay intact. Text is cleaned first: Unicode NFKC (turns ligatures like `ﬁ` back into `fi`), whitespace collapsed to single spaces, NUL chars removed. Pages without text produce no chunks but still count in `page_count`.
+- **Chunking** (`app/chunking.py`, returns `TextChunk` DTOs): per page, ~500 chars with ~50 overlap, never crossing page boundaries (so every chunk has exactly one page number to cite). Cuts land on spaces so words stay intact. Text is cleaned first (`clean_text()`): broken ligatures from some Word-exported PDFs are fixed (a character U+XX00 whose high byte XX is an ASCII letter becomes that letter, e.g. `verp昀氀ichtet` → `verpflichtet`; done before NFKC, which doesn't catch them), then Unicode NFKC (turns ligatures like `ﬁ` back into `fi`), whitespace collapsed to single spaces, NUL chars removed. Pages without text produce no chunks but still count in `page_count`.
 - **Retrieval**: the question is embedded with the same model (`embed()`), then the top 5 chunks by cosine distance (`<=>`, `cosine_distance()` in SQLAlchemy), optionally filtered by `document_ids`. Exact search, no ANN index yet; that's fine up to tens of thousands of chunks.
 - **Upload is all-or-nothing**: document and chunks (with embeddings) are written in one transaction, so if embedding fails nothing is stored.
 - **Config**: pydantic-settings reading `backend/.env` (template: `.env.example`; `.env` is git-ignored).
@@ -38,7 +38,8 @@ Start Claude Code sessions from the repo root; this file is picked up when worki
 - **CORS**: allowed origins come from `CORS_ORIGINS`.
 - **Validation errors (422)** are returned as `{"detail": "<string>"}` by a custom handler in `main.py` (FastAPI's default `detail` is a list), so every error has the same shape.
 - **Health** (`GET /health`): checks Postgres (`SELECT 1`) and Ollama (list models) in parallel, 3 s timeout each. Always 200; the body says what's down.
-- **Tests**: pytest. Ollama calls are mocked.
+- **Tests**: pytest (`requirements-dev.txt`, config in `pytest.ini`: `pythonpath = .`, so `import app…` works). Ollama calls are mocked.
+- **Changing `clean_text()` / chunking only affects new uploads.** Stored chunks and embeddings keep the old text: delete and re-upload affected documents.
 - Keep it simple: no auth, no background jobs, no extra layers.
 
 ## Folder structure
@@ -48,6 +49,8 @@ backend/
 ├── Dockerfile             # image for the root docker-compose.yml (service `backend`)
 ├── .dockerignore
 ├── requirements.txt
+├── requirements-dev.txt   # -r requirements.txt + pytest
+├── pytest.ini
 ├── .venv/                 # virtualenv (git-ignored)
 ├── .env.example           # copy to .env
 ├── .env                   # local config (git-ignored)
@@ -63,9 +66,10 @@ backend/
 │   ├── chunking.py        # pure chunking function (easy to test)
 │   ├── ollama.py          # shared AsyncClient; chat(system, user) → reply, embed(texts) → vectors; OllamaError
 │   └── prompts.py         # SYSTEM_PROMPT (answer rules), build_user_message(), fixed no-sources answer
-└── tests/                 # ⏳ step 6
-    ├── test_chunking.py
-    └── test_endpoints.py
+└── tests/
+    ├── fixtures/not_a_pdf.txt
+    ├── test_chunking.py   # clean_text() (broken ligatures, NFKC, whitespace)
+    └── test_endpoints.py  # ⏳ step 6
 ```
 
 **Rule: three kinds of data classes, three files, never mixed.**
@@ -191,11 +195,11 @@ ollama pull llama3.2:3b
 
 # 3. Python env + app
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # app + pytest (the Docker image installs only requirements.txt)
 cp .env.example .env            # first time only
 uvicorn app.main:app --reload   # → http://localhost:8000/docs
 
-# 4. Tests
+# 4. Tests (from backend/)
 pytest
 ```
 
@@ -207,4 +211,4 @@ pytest
 - [x] 5. Add the Ollama chat call to `/ask` (system prompt follows the answer rules under `POST /ask`), Ollama errors → 503
   - Known issue: `llama3.2:3b` follows the rules only partly (2026-11-25, sample rental contract): often no word-for-word quote / `[n]`,
     answered an English question in German, and once said "nichts" although the clause was in source [1].
-- [ ] 6. Tests for the chunking logic and the endpoints (Ollama mocked)
+- [ ] 6. Tests for the chunking logic and the endpoints (Ollama mocked). Started: `tests/test_chunking.py` covers `clean_text()`
